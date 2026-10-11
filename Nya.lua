@@ -1557,11 +1557,655 @@ function RunService:StartCycle()
 end
 
 function RunService:IsClient()
-  return not RunService.IsServerBool
+  return not RunService.Server
 end
 
 function RunService:IsServer()
-  return RunService.IsServerBool
+  return RunService.Server
+end
+
+local TaskInstance = {}
+
+function TaskInstance.new()
+  local self = {
+    Function = nil,
+    Thread = nil,
+    Waiting = false,
+  }
+
+  function self:Initialize()
+    self.Thread = coroutine.create(self.Function)
+  end
+
+  function self:GetStatus()
+    local Status = coroutine.status(self.Thread)
+
+    if Status == "normal" then
+      return "Running"
+    end
+
+    return Status:sub(1, 1):upper() .. Status:sub(2)
+  end
+
+  function self:Resume(...)
+    local Success, Error = coroutine.resume(self.Thread, ...)
+    if not Success then
+      error(Error, 0)
+    end
+  end
+
+  return self
+end
+
+local TaskService = Instance.new("Service")
+TaskService.Name = "TaskService"
+TaskService.Threads = {}
+TaskService.Waiting = {}
+
+function TaskService:Spawn(Function)
+  local Thread = Instance.new("Thread")
+  Thread.Function = Function
+  Thread:Initialize()
+
+  self.Threads[Thread] = Thread
+  return Thread
+end
+
+function TaskService:Step()
+  local Now = TimeService:PreciseNow()
+
+  for Index = #self.Waiting, 1, -1 do
+    local Waiting = self.Waiting[Index]
+
+    if Now >= Waiting.Until then
+      table.remove(self.Waiting, Index)
+      Waiting.Thread.Waiting = false
+      Waiting.Thread:Resume()
+    end
+  end
+
+  for Thread in pairs(self.Threads) do
+    if Thread:GetStatus() == "Dead" then
+      self.Threads[Thread] = nil
+    elseif not Thread.Waiting then
+      Thread:Resume()
+    end
+  end
+end
+
+function TaskService.wait(Duration)
+  local Coroutine = coroutine.running()
+  local Thread
+
+  for _, Item in pairs(TaskService.Threads) do
+    if Item.Thread == Coroutine then
+      Thread = Item
+      break
+    end
+  end
+
+  if not Thread then
+    Thread = Instance.new("Thread")
+    Thread.Thread = Coroutine
+    TaskService.Threads[Thread] = Thread
+  end
+
+  Thread.Waiting = true
+
+  table.insert(TaskService.Waiting, {
+    Thread = Thread,
+    Until = TimeService:PreciseNow() + (Duration or 0),
+  })
+
+  return coroutine.yield()
+end
+
+function TaskService.delay(Duration, Function)
+  return TaskService:Spawn(function()
+    TaskService.wait(Duration)
+    Function()
+  end)
+end
+
+local RandomInstance = {}
+local RandomService = {}
+
+function RandomInstance.new(Seed)
+  if Seed == nil then
+    Seed = TimeService:Now()
+  end
+  local RNG = {}
+  RNG.StartSeed = Seed
+  RNG.CurrentSeed = Seed
+
+  function RNG:RawRandom()
+    local X = RNG.CurrentSeed
+    X = X ~ ((X << 13) & 0xffffffff)
+    X = X ~ (X >> 17)
+    X = X ~ ((X << 5) & 0xffffffff)
+    RNG.CurrentSeed = X & 0xffffffff
+    return RNG.CurrentSeed
+  end
+
+  function RNG:Next()
+    return RNG:RawRandom() / 0x100000000
+  end
+
+  function RNG:NextInteger(Min, Max)
+    return Min + math.floor(RNG:Next() * (Max - Min + 1))
+  end
+
+  function RNG:NextNumber(Min, Max)
+    if Min == nil and Max == nil then
+      return RNG:Next()
+    end
+    if Max == nil then
+      Max = Min
+      Min = 0
+    end
+
+    return Min + RNG:Next() * (Max - Min)
+  end
+
+  function RNG:NextBoolean()
+    return RNG:NextInteger(0, 1) == 1
+  end
+
+  function RNG:Seed(Seed)
+    if Seed == nil then
+      for _ = 1, 4 do
+        Seed = TimeService:Now()
+      end
+    end
+    RNG.StartSeed = Seed
+    RNG.CurrentSeed = Seed
+    RNG:RawRandom()
+  end
+
+  for _ = 1, 4 do
+    RNG:RawRandom()
+  end
+
+  return RNG
+end
+
+RandomService = Instance.new("Service")
+RandomService.Name = "RandomService"
+
+function RandomService.new(Seed)
+  return RandomInstance.new(Seed)
+end
+
+local JSONModule = {}
+local JSONService = {}
+
+JSONModule.null = setmetatable({}, {
+  __tostring = function()
+    return "null"
+  end,
+})
+
+JSONModule.ArrayMeta = { __json_type = "array" }
+
+function JSONModule.Array()
+  return setmetatable({}, JSONModule.ArrayMeta)
+end
+
+function JSONModule.IsArray(Value)
+  if getmetatable(Value) == JSONModule.ArrayMeta then
+    return true
+  end
+
+  local Count, Max = 0, 0
+
+  for Key in pairs(Value) do
+    if type(Key) ~= "number" or Key < 1 or Key % 1 ~= 0 then
+      return false
+    end
+
+    Count = Count + 1
+    Max = math.max(Max, Key)
+  end
+
+  return Count > 0 and Count == Max
+end
+
+function JSONModule.EscapeString(Value)
+  return '"'
+    .. Value:gsub('[%z\1-\31\\"]', function(Char)
+      local Escapes = {
+        ['"'] = '\\"',
+        ["\\"] = "\\\\",
+        ["\b"] = "\\b",
+        ["\f"] = "\\f",
+        ["\n"] = "\\n",
+        ["\r"] = "\\r",
+        ["\t"] = "\\t",
+      }
+
+      return Escapes[Char] or string.format("\\u%04X", Char:byte())
+    end)
+    .. '"'
+end
+
+function JSONModule.EncodeValue(Value, Seen)
+  local Type = type(Value)
+
+  if Value == JSONModule.null then
+    return "null"
+  elseif Type == "boolean" then
+    return Value and "true" or "false"
+  elseif Type == "number" then
+    if Value ~= Value or math.abs(Value) == math.huge then
+      return nil, "JSON cannot encode NaN or infinity"
+    end
+
+    return tostring(Value)
+  elseif Type == "string" then
+    return JSONModule.EscapeString(Value)
+  elseif Type ~= "table" then
+    return nil, "Unsupported JSON value: " .. Type
+  end
+
+  if Seen[Value] then
+    return nil, "Cannot encode cyclic tables"
+  end
+
+  Seen[Value] = true
+  local Parts = {}
+
+  if JSONModule.IsArray(Value) then
+    for Index = 1, #Value do
+      local Result, Error = JSONModule.EncodeValue(Value[Index], Seen)
+
+      if Error then
+        Seen[Value] = nil
+        return nil, Error
+      end
+
+      Parts[Index] = Result
+    end
+
+    Seen[Value] = nil
+    return "[" .. table.concat(Parts, ",") .. "]"
+  end
+
+  for Key, Item in pairs(Value) do
+    if type(Key) ~= "string" then
+      Seen[Value] = nil
+      return nil, "JSON object keys must be strings"
+    end
+
+    local Result, Error = JSONModule.EncodeValue(Item, Seen)
+
+    if Error then
+      Seen[Value] = nil
+      return nil, Error
+    end
+
+    Parts[#Parts + 1] = JSONModule.EscapeString(Key) .. ":" .. Result
+  end
+
+  Seen[Value] = nil
+  return "{" .. table.concat(Parts, ",") .. "}"
+end
+
+function JSONModule.Encode(Value)
+  return JSONModule.EncodeValue(Value, {})
+end
+
+function JSONModule.UTF8(Codepoint)
+  if Codepoint <= 0x7F then
+    return string.char(Codepoint)
+  elseif Codepoint <= 0x7FF then
+    return string.char(0xC0 + math.floor(Codepoint / 64), 0x80 + Codepoint % 64)
+  elseif Codepoint <= 0xFFFF then
+    return string.char(
+      0xE0 + math.floor(Codepoint / 4096),
+      0x80 + math.floor(Codepoint / 64) % 64,
+      0x80 + Codepoint % 64
+    )
+  end
+
+  return string.char(
+    0xF0 + math.floor(Codepoint / 262144),
+    0x80 + math.floor(Codepoint / 4096) % 64,
+    0x80 + math.floor(Codepoint / 64) % 64,
+    0x80 + Codepoint % 64
+  )
+end
+
+function JSONModule.DecodeValue(Source)
+  local Position, Length = 1, #Source
+
+  local function Fail(Message)
+    return nil, ("JSON error at position %d: %s"):format(Position, Message)
+  end
+
+  local function SkipWhitespace()
+    while Position <= Length do
+      local Char = Source:sub(Position, Position)
+
+      if Char == " " or Char == "\t" or Char == "\n" or Char == "\r" then
+        Position = Position + 1
+      else
+        break
+      end
+    end
+  end
+
+  local function ReadUnicode()
+    local Hex = Source:sub(Position, Position + 3)
+
+    if #Hex ~= 4 or not Hex:match("^%x%x%x%x$") then
+      return nil, "Invalid Unicode escape"
+    end
+
+    Position = Position + 4
+    return tonumber(Hex, 16)
+  end
+
+  local function ReadString()
+    Position = Position + 1
+    local Parts = {}
+    local Start = Position
+
+    while Position <= Length do
+      local Char = Source:sub(Position, Position)
+      local Byte = Source:byte(Position)
+
+      if Char == '"' then
+        Parts[#Parts + 1] = Source:sub(Start, Position - 1)
+        Position = Position + 1
+        return table.concat(Parts)
+      elseif Char == "\\" then
+        Parts[#Parts + 1] = Source:sub(Start, Position - 1)
+        Position = Position + 1
+
+        local Escape = Source:sub(Position, Position)
+        local Escapes = {
+          ['"'] = '"',
+          ["\\"] = "\\",
+          ["/"] = "/",
+          b = "\b",
+          f = "\f",
+          n = "\n",
+          r = "\r",
+          t = "\t",
+        }
+
+        if Escapes[Escape] then
+          Parts[#Parts + 1] = Escapes[Escape]
+          Position = Position + 1
+        elseif Escape == "u" then
+          Position = Position + 1
+
+          local Codepoint, Error = ReadUnicode()
+          if Error then
+            return nil, Error
+          end
+
+          if Codepoint >= 0xD800 and Codepoint <= 0xDBFF then
+            if Source:sub(Position, Position + 1) ~= "\\u" then
+              return nil, "Missing low surrogate"
+            end
+
+            Position = Position + 2
+
+            local Low
+            Low, Error = ReadUnicode()
+
+            if Error then
+              return nil, Error
+            end
+
+            if Low < 0xDC00 or Low > 0xDFFF then
+              return nil, "Invalid low surrogate"
+            end
+
+            Codepoint = 0x10000 + (Codepoint - 0xD800) * 0x400 + Low - 0xDC00
+          elseif Codepoint >= 0xDC00 and Codepoint <= 0xDFFF then
+            return nil, "Unexpected low surrogate"
+          end
+
+          Parts[#Parts + 1] = JSONModule.UTF8(Codepoint)
+        else
+          return nil, "Invalid string escape"
+        end
+
+        Start = Position
+      elseif Byte < 32 then
+        return nil, "Unescaped control character"
+      else
+        Position = Position + 1
+      end
+    end
+
+    return nil, "Unterminated string"
+  end
+
+  local function ReadNumber()
+    local Start = Position
+
+    if Source:sub(Position, Position) == "-" then
+      Position = Position + 1
+    end
+
+    local Char = Source:sub(Position, Position)
+
+    if Char == "0" then
+      Position = Position + 1
+
+      if Source:sub(Position, Position):match("%d") then
+        return nil, "Leading zeros are not allowed"
+      end
+    elseif Char:match("[1-9]") then
+      repeat
+        Position = Position + 1
+      until not Source:sub(Position, Position):match("%d")
+    else
+      return nil, "Invalid number"
+    end
+
+    if Source:sub(Position, Position) == "." then
+      Position = Position + 1
+
+      if not Source:sub(Position, Position):match("%d") then
+        return nil, "Expected decimal digits"
+      end
+
+      repeat
+        Position = Position + 1
+      until not Source:sub(Position, Position):match("%d")
+    end
+
+    local Exponent = Source:sub(Position, Position)
+
+    if Exponent == "e" or Exponent == "E" then
+      Position = Position + 1
+
+      local Sign = Source:sub(Position, Position)
+      if Sign == "+" or Sign == "-" then
+        Position = Position + 1
+      end
+
+      if not Source:sub(Position, Position):match("%d") then
+        return nil, "Expected exponent digits"
+      end
+
+      repeat
+        Position = Position + 1
+      until not Source:sub(Position, Position):match("%d")
+    end
+
+    local Number = tonumber(Source:sub(Start, Position - 1))
+
+    if not Number or Number ~= Number or math.abs(Number) == math.huge then
+      return nil, "Number out of range"
+    end
+
+    return Number
+  end
+
+  local ReadValue
+
+  local function ReadArray()
+    Position = Position + 1
+    SkipWhitespace()
+
+    local Result = JSONModule.Array()
+
+    if Source:sub(Position, Position) == "]" then
+      Position = Position + 1
+      return Result
+    end
+
+    while true do
+      local Value, Error = ReadValue()
+
+      if Error then
+        return nil, Error
+      end
+
+      Result[#Result + 1] = Value
+      SkipWhitespace()
+
+      local Char = Source:sub(Position, Position)
+      Position = Position + 1
+
+      if Char == "]" then
+        return Result
+      elseif Char ~= "," then
+        return nil, "Expected ',' or ']'"
+      end
+
+      SkipWhitespace()
+    end
+  end
+
+  local function ReadObject()
+    Position = Position + 1
+    SkipWhitespace()
+
+    local Result = {}
+
+    if Source:sub(Position, Position) == "}" then
+      Position = Position + 1
+      return Result
+    end
+
+    while true do
+      if Source:sub(Position, Position) ~= '"' then
+        return nil, "Expected string key"
+      end
+
+      local Key, Error = ReadString()
+
+      if Error then
+        return nil, Error
+      end
+
+      SkipWhitespace()
+
+      if Source:sub(Position, Position) ~= ":" then
+        return nil, "Expected ':'"
+      end
+
+      Position = Position + 1
+      SkipWhitespace()
+
+      if Result[Key] ~= nil then
+        return nil, "Duplicate object key: " .. Key
+      end
+
+      local Value
+      Value, Error = ReadValue()
+
+      if Error then
+        return nil, Error
+      end
+
+      Result[Key] = Value
+      SkipWhitespace()
+
+      local Char = Source:sub(Position, Position)
+      Position = Position + 1
+
+      if Char == "}" then
+        return Result
+      elseif Char ~= "," then
+        return nil, "Expected ',' or '}'"
+      end
+
+      SkipWhitespace()
+    end
+  end
+
+  ReadValue = function()
+    SkipWhitespace()
+
+    local Char = Source:sub(Position, Position)
+
+    if Char == '"' then
+      return ReadString()
+    elseif Char == "{" then
+      return ReadObject()
+    elseif Char == "[" then
+      return ReadArray()
+    elseif Char == "-" or Char:match("%d") then
+      return ReadNumber()
+    elseif Source:sub(Position, Position + 3) == "true" then
+      Position = Position + 4
+      return true
+    elseif Source:sub(Position, Position + 4) == "false" then
+      Position = Position + 5
+      return false
+    elseif Source:sub(Position, Position + 3) == "null" then
+      Position = Position + 4
+      return JSONModule.null
+    end
+
+    return nil, "Unexpected token at position " .. Position
+  end
+
+  local Result, Error = ReadValue()
+
+  if Error then
+    return nil, Error
+  end
+
+  SkipWhitespace()
+
+  if Position <= Length then
+    return nil, "Unexpected trailing data at position " .. Position
+  end
+
+  return Result
+end
+
+function JSONModule.Decode(Source)
+  if type(Source) ~= "string" then
+    return nil, "JSON input must be a string"
+  end
+
+  return JSONModule.DecodeValue(Source)
+end
+
+JSONService = Instance.new("Service")
+JSONService.Name = "JSONService"
+
+JSONService.null = JSONModule.null
+
+function JSONService:Array()
+  return JSONModule.Array()
+end
+
+function JSONService:Encode(Value)
+  return JSONModule.Encode(Value)
+end
+
+function JSONService:Decode(Source)
+  return JSONModule.Decode(Source)
 end
 
 Nya.Instance = Instance
@@ -1576,7 +2220,13 @@ Nya.Vector3 = Vector3
 Nya.CFrame = CFrame
 
 ServiceManager:RegisterService("TimeService", TimeService)
+ServiceManager:RegisterService("RunService", RunService)
 ServiceManager:RegisterService("TaskService", TaskService)
+ServiceManager:RegisterService("RandomService", RandomService)
+ServiceManager:RegisterService("JSONService", JSONService)
+
+Instance:RegisterClass("Thread", TaskInstance, Instance)
+Instance:RegisterClass("Random", RandomInstance, Instance)
 
 for Key, Value in pairs(ServiceManager) do
   Nya[Key] = Value
