@@ -599,11 +599,126 @@ function Color3Meta:__tostring()
   return string.format("Color3(%.3f, %.3f, %.3f)", self.R, self.G, self.B)
 end
 
+local Color4 = {}
+local Color4Meta = {}
+Color4Meta.__index = Color4Meta
+
+function Color4.new(R, G, B, A)
+  return setmetatable({
+    R = R or 0,
+    G = G or 0,
+    B = B or 0,
+    A = A == nil and 1 or A,
+  }, Color4Meta)
+end
+
+function Color4.fromRGB(R, G, B)
+  return Color4.new(R / 255, G / 255, B / 255)
+end
+
+function Color4.fromRGBA(R, G, B, A)
+  return Color4.new(R / 255, G / 255, B / 255, A / 255)
+end
+
+function Color4.fromHSV(H, S, V)
+  return Color4.fromHSVA(H, S, V, 255)
+end
+
+function Color4.fromHSVA(H, S, V, A)
+  H, S, V = H % 1 * 6, math.clamp(S, 0, 1), math.clamp(V, 0, 1)
+
+  local C = V * S
+  local X = C * (1 - math.abs(H % 2 - 1))
+  local M = V - C
+  local R, G, B
+
+  if H < 1 then
+    R, G, B = C, X, 0
+  elseif H < 2 then
+    R, G, B = X, C, 0
+  elseif H < 3 then
+    R, G, B = 0, C, X
+  elseif H < 4 then
+    R, G, B = 0, X, C
+  elseif H < 5 then
+    R, G, B = X, 0, C
+  else
+    R, G, B = C, 0, X
+  end
+
+  return Color4.new(R + M, G + M, B + M, (A or 255) / 255)
+end
+
+function Color4.fromHex(Hex)
+  Hex = Hex:gsub("#", "")
+
+  if #Hex == 3 or #Hex == 4 then
+    Hex = Hex:gsub(".", function(C)
+      return C .. C
+    end)
+  end
+
+  local R = tonumber(Hex:sub(1, 2), 16)
+  local G = tonumber(Hex:sub(3, 4), 16)
+  local B = tonumber(Hex:sub(5, 6), 16)
+  local A = #Hex == 8 and tonumber(Hex:sub(7, 8), 16) or 255
+
+  return Color4.fromRGBA(R, G, B, A)
+end
+
+function Color4Meta:ToHSV()
+  local R, G, B = self.R, self.G, self.B
+  local Max, Min = math.max(R, G, B), math.min(R, G, B)
+  local D, H = Max - Min, 0
+
+  if D ~= 0 then
+    if Max == R then
+      H = ((G - B) / D) % 6
+    elseif Max == G then
+      H = (B - R) / D + 2
+    else
+      H = (R - G) / D + 4
+    end
+    H = H / 6
+  end
+
+  return H, Max == 0 and 0 or D / Max, Max
+end
+
+function Color4Meta:ToHSVA()
+  local H, S, V = self:ToHSV()
+  return H, S, V, self.A
+end
+
+function Color4Meta:ToHex()
+  return string.format(
+    "#%02X%02X%02X%02X",
+    math.floor(self.R * 255),
+    math.floor(self.G * 255),
+    math.floor(self.B * 255),
+    math.floor(self.A * 255)
+  )
+end
+
+function Color4Meta:Lerp(Goal, Alpha)
+  return Color4.new(
+    self.R + (Goal.R - self.R) * Alpha,
+    self.G + (Goal.G - self.G) * Alpha,
+    self.B + (Goal.B - self.B) * Alpha,
+    self.A + (Goal.A - self.A) * Alpha
+  )
+end
+
+function Color4Meta:__tostring()
+  return string.format("Color4(%.3f, %.3f, %.3f, %.3f)", self.R, self.G, self.B, self.A)
+end
+
 Nya.Instance = Instance
 Nya.ServiceManager = ServiceManager
 Nya.Connection = Connection
 Nya.Signal = Signal
 Nya.Color3 = Color3
+Nya.Color4 = Color4
 
 for Key, Value in pairs(ServiceManager) do
   Nya[Key] = Value
