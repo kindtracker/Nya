@@ -22,39 +22,6 @@ local Instance = {}
 
 Instance.Classes = {}
 
-local function NewSignal()
-  local Signal = { Connections = {} }
-
-  function Signal:Connect(Callback)
-    local Connection = { Connected = true }
-
-    function Connection:Disconnect()
-      self.Connected = false
-    end
-
-    Connection.Callback = Callback
-    table.insert(Signal.Connections, Connection)
-    return Connection
-  end
-
-  function Signal:Fire(...)
-    for _, Connection in ipairs(Signal.Connections) do
-      if Connection.Connected then
-        Connection.Callback(...)
-      end
-    end
-  end
-
-  function Signal:DisconnectAll()
-    for _, Connection in ipairs(self.Connections) do
-      Connection:Disconnect()
-    end
-    self.Connections = {}
-  end
-
-  return Signal
-end
-
 function Instance:RegisterClass(Name, Module, ParentModule)
   self.Classes[Name] = {
     Module = Module,
@@ -81,13 +48,13 @@ function Instance.new(ClassName, Parent)
     Attributes = {},
     Tags = {},
     UniqueId = tostring({}):gsub("table: ", ""),
-    Changed = NewSignal(),
-    ChildAdded = NewSignal(),
-    ChildRemoved = NewSignal(),
-    Destroying = NewSignal(),
-    AncestryChanged = NewSignal(),
-    DescendantAdded = NewSignal(),
-    DescendantRemoving = NewSignal(),
+    Changed = Signal.new(),
+    ChildAdded = Signal.new(),
+    ChildRemoved = Signal.new(),
+    Destroying = Signal.new(),
+    AncestryChanged = Signal.new(),
+    DescendantAdded = Signal.new(),
+    DescendantRemoving = Signal.new(),
   }
 
   local Methods = {}
@@ -271,7 +238,7 @@ function Instance.new(ClassName, Parent)
   end
 
   function Methods:GetPropertyChangedSignal(Name)
-    PropertySignals[Name] = PropertySignals[Name] or NewSignal()
+    PropertySignals[Name] = PropertySignals[Name] or Signal.new()
     return PropertySignals[Name]
   end
 
@@ -294,7 +261,7 @@ function Instance.new(ClassName, Parent)
 
   function Methods:GetAttributeChangedSignal(Name)
     Properties.AttributeSignals = Properties.AttributeSignals or {}
-    Properties.AttributeSignals[Name] = Properties.AttributeSignals[Name] or NewSignal()
+    Properties.AttributeSignals[Name] = Properties.AttributeSignals[Name] or Signal.new()
 
     return Properties.AttributeSignals[Name]
   end
@@ -486,8 +453,157 @@ function ServiceManager:RemoveService(ServiceName)
   return Service
 end
 
+local Connection = {}
+
+function Connection.new(Callback, DisconnectCallback)
+  return {
+    Connected = Callback ~= nil,
+    Callback = Callback,
+
+    Disconnect = function(self)
+      if not self.Connected then
+        return
+      end
+      self.Connected = false
+
+      if DisconnectCallback then
+        DisconnectCallback()
+      end
+    end,
+  }
+end
+
+local Signal = {}
+
+function Signal.new()
+  local self = { Connections = {} }
+
+  function self:Connect(Callback, DisconnectCallback)
+    local ConnectionObject
+
+    ConnectionObject = Connection.new(Callback, function()
+      for i, Item in ipairs(self.Connections) do
+        if Item == ConnectionObject then
+          table.remove(self.Connections, i)
+          break
+        end
+      end
+
+      if DisconnectCallback then
+        DisconnectCallback(ConnectionObject)
+      end
+    end)
+
+    table.insert(self.Connections, ConnectionObject)
+    return ConnectionObject
+  end
+
+  function self:DisconnectAll()
+    while #self.Connections > 0 do
+      self.Connections[1]:Disconnect()
+    end
+  end
+
+  function self:Fire(...)
+    for _, Item in ipairs(self.Connections) do
+      if Item.Connected then
+        Item.Callback(...)
+      end
+    end
+  end
+
+  return self
+end
+
+local Color3 = {}
+local Color3Meta = {}
+Color3Meta.__index = Color3Meta
+
+function Color3.new(R, G, B)
+  return setmetatable({
+    R = R or 0,
+    G = G or 0,
+    B = B or 0,
+  }, Meta)
+end
+
+function Color3.fromRGB(R, G, B)
+  return Color3.new(R / 255, G / 255, B / 255)
+end
+
+function Color3.fromHex(Hex)
+  Hex = Hex:gsub("#", "")
+  if #Hex == 3 then
+    Hex = Hex:sub(1, 1):rep(2) .. Hex:sub(2, 2):rep(2) .. Hex:sub(3, 3):rep(2)
+  end
+
+  return Color3.fromRGB(tonumber(Hex:sub(1, 2), 16), tonumber(Hex:sub(3, 4), 16), tonumber(Hex:sub(5, 6), 16))
+end
+
+function Color3.fromHSV(H, S, V)
+  H = (H % 1) * 6
+  local C = V * S
+  local X = C * (1 - math.abs(H % 2 - 1))
+  local M = V - C
+  local R, G, B
+
+  if H < 1 then
+    R, G, B = C, X, 0
+  elseif H < 2 then
+    R, G, B = X, C, 0
+  elseif H < 3 then
+    R, G, B = 0, C, X
+  elseif H < 4 then
+    R, G, B = 0, X, C
+  elseif H < 5 then
+    R, G, B = X, 0, C
+  else
+    R, G, B = C, 0, X
+  end
+
+  return Color3.new(R + M, G + M, B + M)
+end
+
+function Color3Meta:ToHSV()
+  local R, G, B = self.R, self.G, self.B
+  local Max, Min = math.max(R, G, B), math.min(R, G, B)
+  local D, H = Max - Min, 0
+
+  if D ~= 0 then
+    if Max == R then
+      H = ((G - B) / D) % 6
+    elseif Max == G then
+      H = (B - R) / D + 2
+    else
+      H = (R - G) / D + 4
+    end
+    H = H / 6
+  end
+
+  return H, Max == 0 and 0 or D / Max, Max
+end
+
+function Color3Meta:ToHex()
+  return string.format("#%02X%02X%02X", math.floor(self.R * 255), math.floor(self.G * 255), math.floor(self.B * 255))
+end
+
+function Color3Meta:Lerp(Goal, Alpha)
+  return Color3.new(
+    self.R + (Goal.R - self.R) * Alpha,
+    self.G + (Goal.G - self.G) * Alpha,
+    self.B + (Goal.B - self.B) * Alpha
+  )
+end
+
+function Color3Meta:__tostring()
+  return string.format("Color3(%.3f, %.3f, %.3f)", self.R, self.G, self.B)
+end
+
 Nya.Instance = Instance
 Nya.ServiceManager = ServiceManager
+Nya.Connection = Connection
+Nya.Signal = Signal
+Nya.Color3 = Color3
 
 for Key, Value in pairs(ServiceManager) do
   Nya[Key] = Value
