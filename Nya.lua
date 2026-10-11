@@ -1513,6 +1513,57 @@ function CFrame.fromMatrix(Position, XVector, YVector, ZVector)
   )
 end
 
+local TimeService = Instance.new("Service")
+TimeService.Name = "TimeService"
+
+TimeService.StartTime = os.clock()
+TimeService.StartUnixTime = os.time()
+
+function TimeService:Now()
+  return os.time()
+end
+
+function TimeService:Elapsed()
+  return os.clock() - self.StartTime
+end
+
+function TimeService:PreciseNow()
+  return self.StartUnixTime + self:Elapsed()
+end
+
+function TimeService:Date(...)
+  return os.date(...)
+end
+
+local RunService = Instance.new("Service")
+RunService.Name = "RunService"
+RunService.Stepped = Signal.new()
+RunService.Heartbeat = Signal.new()
+RunService.Server = true
+RunService.UpdateDelay = 1 / 24
+
+local LastTime = TimeService:PreciseNow()
+
+function RunService:StartCycle()
+  TaskService.delay(RunService.UpdateDelay, function()
+    local Now = TimeService:PreciseNow()
+    local DeltaTime = Now - LastTime
+    LastTime = Now
+
+    RunService.Stepped:Fire(DeltaTime)
+    RunService.Heartbeat:Fire(DeltaTime)
+    RunService:StartCycle()
+  end)
+end
+
+function RunService:IsClient()
+  return not RunService.IsServerBool
+end
+
+function RunService:IsServer()
+  return RunService.IsServerBool
+end
+
 Nya.Instance = Instance
 Nya.ServiceManager = ServiceManager
 Nya.Connection = Connection
@@ -1523,6 +1574,9 @@ Nya.UDim = UDim
 Nya.Vector2 = Vector2
 Nya.Vector3 = Vector3
 Nya.CFrame = CFrame
+
+ServiceManager:RegisterService("TimeService", TimeService)
+ServiceManager:RegisterService("TaskService", TaskService)
 
 for Key, Value in pairs(ServiceManager) do
   Nya[Key] = Value
