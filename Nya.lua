@@ -1082,6 +1082,437 @@ function Vector3Meta:Lerp(Goal, Alpha)
   return self + (Goal - self) * Alpha
 end
 
+local CFrame = {}
+local CFrameMeta = {}
+
+CFrameMeta.__index = CFrameMeta
+
+local function Dot(A, B)
+  return A.X * B.X + A.Y * B.Y + A.Z * B.Z
+end
+
+local function Cross(A, B)
+  return Vector3.new(A.Y * B.Z - A.Z * B.Y, A.Z * B.X - A.X * B.Z, A.X * B.Y - A.Y * B.X)
+end
+
+local function Normalize(V)
+  local Length = math.sqrt(Dot(V, V))
+  return Length == 0 and Vector3.zero or V / Length
+end
+
+local CreateCFrame
+
+function CFrameMeta.__index(self, Key)
+  if Key == "Position" then
+    return Vector3.new(self.X, self.Y, self.Z)
+  elseif Key == "XVector" or Key == "RightVector" then
+    return Vector3.new(self.R00, self.R10, self.R20)
+  elseif Key == "YVector" or Key == "UpVector" then
+    return Vector3.new(self.R01, self.R11, self.R21)
+  elseif Key == "ZVector" then
+    return Vector3.new(self.R02, self.R12, self.R22)
+  elseif Key == "LookVector" then
+    return Vector3.new(-self.R02, -self.R12, -self.R22)
+  elseif Key == "Rotation" then
+    return CreateCFrame(
+      0,
+      0,
+      0,
+      self.R00,
+      self.R01,
+      self.R02,
+      self.R10,
+      self.R11,
+      self.R12,
+      self.R20,
+      self.R21,
+      self.R22
+    )
+  end
+
+  return CFrameMeta[Key]
+end
+
+function CFrameMeta.__newindex(self, Key, Value)
+  if
+    Key == "Position"
+    or Key == "Rotation"
+    or Key == "XVector"
+    or Key == "RightVector"
+    or Key == "YVector"
+    or Key == "UpVector"
+    or Key == "ZVector"
+    or Key == "LookVector"
+  then
+    return
+  end
+
+  rawset(self, Key, Value)
+end
+
+CreateCFrame = function(X, Y, Z, R00, R01, R02, R10, R11, R12, R20, R21, R22)
+  return setmetatable({
+    X = X,
+    Y = Y,
+    Z = Z,
+    R00 = R00,
+    R01 = R01,
+    R02 = R02,
+    R10 = R10,
+    R11 = R11,
+    R12 = R12,
+    R20 = R20,
+    R21 = R21,
+    R22 = R22,
+  }, CFrameMeta)
+end
+
+local function MatrixToQuaternion(CF)
+  local Trace = CF.R00 + CF.R11 + CF.R22
+  local X, Y, Z, W
+
+  if Trace > 0 then
+    local S = math.sqrt(Trace + 1) * 2
+    W = 0.25 * S
+    X = (CF.R21 - CF.R12) / S
+    Y = (CF.R02 - CF.R20) / S
+    Z = (CF.R10 - CF.R01) / S
+  elseif CF.R00 > CF.R11 and CF.R00 > CF.R22 then
+    local S = math.sqrt(1 + CF.R00 - CF.R11 - CF.R22) * 2
+    W = (CF.R21 - CF.R12) / S
+    X = 0.25 * S
+    Y = (CF.R01 + CF.R10) / S
+    Z = (CF.R02 + CF.R20) / S
+  elseif CF.R11 > CF.R22 then
+    local S = math.sqrt(1 + CF.R11 - CF.R00 - CF.R22) * 2
+    W = (CF.R02 - CF.R20) / S
+    X = (CF.R01 + CF.R10) / S
+    Y = 0.25 * S
+    Z = (CF.R12 + CF.R21) / S
+  else
+    local S = math.sqrt(1 + CF.R22 - CF.R00 - CF.R11) * 2
+    W = (CF.R10 - CF.R01) / S
+    X = (CF.R02 + CF.R20) / S
+    Y = (CF.R12 + CF.R21) / S
+    Z = 0.25 * S
+  end
+
+  return X, Y, Z, W
+end
+
+local function QuaternionSlerp(AX, AY, AZ, AW, BX, BY, BZ, BW, Alpha)
+  local Dot = AX * BX + AY * BY + AZ * BZ + AW * BW
+
+  if Dot < 0 then
+    BX, BY, BZ, BW = -BX, -BY, -BZ, -BW
+    Dot = -Dot
+  end
+
+  if Dot > 0.9995 then
+    local X = AX + Alpha * (BX - AX)
+    local Y = AY + Alpha * (BY - AY)
+    local Z = AZ + Alpha * (BZ - AZ)
+    local W = AW + Alpha * (BW - AW)
+    local Length = math.sqrt(X * X + Y * Y + Z * Z + W * W)
+
+    return X / Length, Y / Length, Z / Length, W / Length
+  end
+
+  local Theta = math.acos(math.max(-1, math.min(1, Dot)))
+  local SinTheta = math.sin(Theta)
+  local A = math.sin((1 - Alpha) * Theta) / SinTheta
+  local B = math.sin(Alpha * Theta) / SinTheta
+
+  return AX * A + BX * B, AY * A + BY * B, AZ * A + BZ * B, AW * A + BW * B
+end
+
+function CFrame.new(...)
+  local Args = { ... }
+  local Count = select("#", ...)
+
+  if Count == 0 then
+    return CreateCFrame(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+  elseif Count == 1 then
+    local P = Args[1]
+    return CFrame.new(P.X, P.Y, P.Z)
+  elseif Count == 2 then
+    local P, Target = Args[1], Args[2]
+    local Forward = Normalize(Target - P)
+    local Up = Vector3.yAxis
+
+    if math.abs(Dot(Forward, Up)) > 0.999 then
+      Up = Vector3.zAxis
+    end
+
+    local Right = Normalize(Cross(Up, Forward))
+    Up = Cross(Forward, Right)
+
+    return CreateCFrame(P.X, P.Y, P.Z, Right.X, Up.X, -Forward.X, Right.Y, Up.Y, -Forward.Y, Right.Z, Up.Z, -Forward.Z)
+  elseif Count == 3 then
+    return CreateCFrame(Args[1], Args[2], Args[3], 1, 0, 0, 0, 1, 0, 0, 0, 1)
+  elseif Count == 7 then
+    local X, Y, Z, QX, QY, QZ, QW = table.unpack(Args)
+
+    return CreateCFrame(
+      X,
+      Y,
+      Z,
+      1 - 2 * (QY * QY + QZ * QZ),
+      2 * (QX * QY - QZ * QW),
+      2 * (QX * QZ + QY * QW),
+      2 * (QX * QY + QZ * QW),
+      1 - 2 * (QX * QX + QZ * QZ),
+      2 * (QY * QZ - QX * QW),
+      2 * (QX * QZ - QY * QW),
+      2 * (QY * QZ + QX * QW),
+      1 - 2 * (QX * QX + QY * QY)
+    )
+  elseif Count == 12 then
+    return CreateCFrame(table.unpack(Args))
+  end
+
+  error("invalid number of arguments to CFrame.new", 2)
+end
+
+function CFrameMeta.__mul(A, B)
+  if B.R00 ~= nil then
+    local R00 = A.R00 * B.R00 + A.R01 * B.R10 + A.R02 * B.R20
+    local R01 = A.R00 * B.R01 + A.R01 * B.R11 + A.R02 * B.R21
+    local R02 = A.R00 * B.R02 + A.R01 * B.R12 + A.R02 * B.R22
+
+    local R10 = A.R10 * B.R00 + A.R11 * B.R10 + A.R12 * B.R20
+    local R11 = A.R10 * B.R01 + A.R11 * B.R11 + A.R12 * B.R21
+    local R12 = A.R10 * B.R02 + A.R11 * B.R12 + A.R12 * B.R22
+
+    local R20 = A.R20 * B.R00 + A.R21 * B.R10 + A.R22 * B.R20
+    local R21 = A.R20 * B.R01 + A.R21 * B.R11 + A.R22 * B.R21
+    local R22 = A.R20 * B.R02 + A.R21 * B.R12 + A.R22 * B.R22
+
+    return CreateCFrame(
+      A.X + A.R00 * B.X + A.R01 * B.Y + A.R02 * B.Z,
+      A.Y + A.R10 * B.X + A.R11 * B.Y + A.R12 * B.Z,
+      A.Z + A.R20 * B.X + A.R21 * B.Y + A.R22 * B.Z,
+      R00,
+      R01,
+      R02,
+      R10,
+      R11,
+      R12,
+      R20,
+      R21,
+      R22
+    )
+  end
+
+  return Vector3.new(
+    A.X + A.R00 * B.X + A.R01 * B.Y + A.R02 * B.Z,
+    A.Y + A.R10 * B.X + A.R11 * B.Y + A.R12 * B.Z,
+    A.Z + A.R20 * B.X + A.R21 * B.Y + A.R22 * B.Z
+  )
+end
+
+function CFrameMeta.__add(A, B)
+  return CreateCFrame(A.X + B.X, A.Y + B.Y, A.Z + B.Z, A.R00, A.R01, A.R02, A.R10, A.R11, A.R12, A.R20, A.R21, A.R22)
+end
+
+function CFrameMeta.__sub(A, B)
+  return CreateCFrame(A.X - B.X, A.Y - B.Y, A.Z - B.Z, A.R00, A.R01, A.R02, A.R10, A.R11, A.R12, A.R20, A.R21, A.R22)
+end
+
+function CFrameMeta:Inverse()
+  local R00, R01, R02 = self.R00, self.R10, self.R20
+  local R10, R11, R12 = self.R01, self.R11, self.R21
+  local R20, R21, R22 = self.R02, self.R12, self.R22
+
+  return CreateCFrame(
+    -(R00 * self.X + R01 * self.Y + R02 * self.Z),
+    -(R10 * self.X + R11 * self.Y + R12 * self.Z),
+    -(R20 * self.X + R21 * self.Y + R22 * self.Z),
+    R00,
+    R01,
+    R02,
+    R10,
+    R11,
+    R12,
+    R20,
+    R21,
+    R22
+  )
+end
+
+function CFrameMeta:VectorToWorldSpace(V)
+  return Vector3.new(
+    self.R00 * V.X + self.R01 * V.Y + self.R02 * V.Z,
+    self.R10 * V.X + self.R11 * V.Y + self.R12 * V.Z,
+    self.R20 * V.X + self.R21 * V.Y + self.R22 * V.Z
+  )
+end
+
+function CFrameMeta:PointToWorldSpace(P)
+  return self * P
+end
+
+function CFrameMeta:VectorToObjectSpace(V)
+  return self:Inverse():VectorToWorldSpace(V)
+end
+
+function CFrameMeta:PointToObjectSpace(P)
+  return self:Inverse() * P
+end
+
+function CFrameMeta:ToWorldSpace(Other)
+  return self * Other
+end
+
+function CFrameMeta:ToObjectSpace(Other)
+  return self:Inverse() * Other
+end
+
+function CFrameMeta:GetComponents()
+  return self.X,
+    self.Y,
+    self.Z,
+    self.R00,
+    self.R01,
+    self.R02,
+    self.R10,
+    self.R11,
+    self.R12,
+    self.R20,
+    self.R21,
+    self.R22
+end
+
+function CFrameMeta:ToAxisAngle()
+  local CosAngle = math.max(-1, math.min(1, (self.R00 + self.R11 + self.R22 - 1) / 2))
+  local Angle = math.acos(CosAngle)
+
+  if Angle < 1e-6 then
+    return Vector3.xAxis, 0
+  end
+
+  local S = 2 * math.sin(Angle)
+  if math.abs(S) < 1e-6 then
+    return Vector3.xAxis, Angle
+  end
+
+  return Normalize(Vector3.new((self.R21 - self.R12) / S, (self.R02 - self.R20) / S, (self.R10 - self.R01) / S)), Angle
+end
+
+function CFrameMeta:ToEulerAnglesXYZ()
+  local Y = math.asin(math.max(-1, math.min(1, -self.R20)))
+  local X, Z
+
+  if math.abs(math.cos(Y)) > 1e-6 then
+    X = math.atan2(self.R21, self.R22)
+    Z = math.atan2(self.R10, self.R00)
+  else
+    X = math.atan2(-self.R12, self.R11)
+    Z = 0
+  end
+
+  return X, Y, Z
+end
+
+function CFrameMeta:ToOrientation()
+  return self:ToEulerAnglesXYZ()
+end
+
+function CFrameMeta:Lerp(Goal, Alpha)
+  local AX, AY, AZ, AW = MatrixToQuaternion(self)
+  local BX, BY, BZ, BW = MatrixToQuaternion(Goal)
+  local QX, QY, QZ, QW = QuaternionSlerp(AX, AY, AZ, AW, BX, BY, BZ, BW, Alpha)
+
+  return CFrame.new(
+    self.X + (Goal.X - self.X) * Alpha,
+    self.Y + (Goal.Y - self.Y) * Alpha,
+    self.Z + (Goal.Z - self.Z) * Alpha,
+    QX,
+    QY,
+    QZ,
+    QW
+  )
+end
+
+function CFrameMeta:FuzzyEq(Other, Epsilon)
+  Epsilon = Epsilon or 1e-6
+
+  for _, Key in ipairs({
+    "X",
+    "Y",
+    "Z",
+    "R00",
+    "R01",
+    "R02",
+    "R10",
+    "R11",
+    "R12",
+    "R20",
+    "R21",
+    "R22",
+  }) do
+    if math.abs(self[Key] - Other[Key]) > Epsilon then
+      return false
+    end
+  end
+
+  return true
+end
+
+function CFrameMeta:IsIdentity()
+  return self:FuzzyEq(CFrame.new(), 0)
+end
+
+function CFrame.Angles(X, Y, Z)
+  local CX, SX = math.cos(X / 2), math.sin(X / 2)
+  local CY, SY = math.cos(Y / 2), math.sin(Y / 2)
+  local CZ, SZ = math.cos(Z / 2), math.sin(Z / 2)
+
+  return CFrame.new(
+    0,
+    0,
+    0,
+    SX * CY * CZ - CX * SY * SZ,
+    CX * SY * CZ + SX * CY * SZ,
+    CX * CY * SZ - SX * SY * CZ,
+    CX * CY * CZ + SX * SY * SZ
+  )
+end
+
+function CFrame.fromAxisAngle(Axis, Angle)
+  Axis = Normalize(Axis)
+  local S = math.sin(Angle / 2)
+
+  return CFrame.new(0, 0, 0, Axis.X * S, Axis.Y * S, Axis.Z * S, math.cos(Angle / 2))
+end
+
+function CFrame.fromEulerAnglesXYZ(X, Y, Z)
+  return CFrame.Angles(X, Y, Z)
+end
+
+function CFrame.fromOrientation(X, Y, Z)
+  return CFrame.Angles(X, Y, Z)
+end
+
+function CFrame.fromMatrix(Position, XVector, YVector, ZVector)
+  ZVector = ZVector or Cross(XVector, YVector)
+
+  return CFrame.new(
+    Position.X,
+    Position.Y,
+    Position.Z,
+    XVector.X,
+    YVector.X,
+    ZVector.X,
+    XVector.Y,
+    YVector.Y,
+    ZVector.Y,
+    XVector.Z,
+    YVector.Z,
+    ZVector.Z
+  )
+end
+
 Nya.Instance = Instance
 Nya.ServiceManager = ServiceManager
 Nya.Connection = Connection
@@ -1091,6 +1522,7 @@ Nya.Color4 = Color4
 Nya.UDim = UDim
 Nya.Vector2 = Vector2
 Nya.Vector3 = Vector3
+Nya.CFrame = CFrame
 
 for Key, Value in pairs(ServiceManager) do
   Nya[Key] = Value
