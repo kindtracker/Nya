@@ -18,6 +18,10 @@
 
 local Nya = {}
 
+local function Sign(Number)
+  return Number > 0 and 1 or Number < 0 and -1 or 0
+end
+
 local Instance = {}
 
 Instance.Classes = {}
@@ -713,12 +717,380 @@ function Color4Meta:__tostring()
   return string.format("Color4(%.3f, %.3f, %.3f, %.3f)", self.R, self.G, self.B, self.A)
 end
 
+local UDim = {}
+local UDimMeta = {}
+UDimMeta.__index = UDimMeta
+
+function UDim.new(Scale, Offset)
+  return setmetatable({
+    Scale = Scale or 0,
+    Offset = Offset or 0,
+  }, UDimMeta)
+end
+
+function UDimMeta.__add(A, B)
+  return UDim.new(A.Scale + B.Scale, A.Offset + B.Offset)
+end
+
+function UDimMeta.__sub(A, B)
+  return UDim.new(A.Scale - B.Scale, A.Offset - B.Offset)
+end
+
+function UDimMeta.__mul(A, B)
+  if type(B) == "number" then
+    return UDim.new(A.Scale * B, A.Offset * B)
+  end
+  return UDim.new(A.Scale * B.Scale, A.Offset * B.Offset)
+end
+
+function UDimMeta.__div(A, B)
+  if type(B) == "number" then
+    return UDim.new(A.Scale / B, A.Offset / B)
+  end
+  return UDim.new(A.Scale / B.Scale, A.Offset / B.Offset)
+end
+
+function UDimMeta.__unm(A)
+  return UDim.new(-A.Scale, -A.Offset)
+end
+
+function UDimMeta.__eq(A, B)
+  return A.Scale == B.Scale and A.Offset == B.Offset
+end
+
+function UDimMeta.__tostring(A)
+  return string.format("%g, %g", A.Scale, A.Offset)
+end
+
+function UDimMeta:Lerp(Goal, Alpha)
+  return UDim.new(self.Scale + (Goal.Scale - self.Scale) * Alpha, self.Offset + (Goal.Offset - self.Offset) * Alpha)
+end
+
+local UDim2 = {}
+local UDim2Meta = {}
+local UDim
+
+UDim2Meta.__index = UDim2Meta
+
+function UDim2.__Lunar_Internal__Init__(udim)
+  UDim = udim
+end
+
+function UDim2.fromScale(X, Y)
+  return UDim2.new(X, 0, Y, 0)
+end
+
+function UDim2.fromOffset(X, Y)
+  return UDim2.new(0, X, 0, Y)
+end
+
+function UDim2.new(...)
+  local Args = { ... }
+  local X, Y, Width, Height = UDim.new(), UDim.new(), UDim.new(), UDim.new()
+
+  if #Args == 2 then
+    X, Y = Args[1], Args[2]
+  elseif #Args == 4 then
+    X = UDim.new(Args[1], Args[2])
+    Y = UDim.new(Args[3], Args[4])
+  end
+
+  return setmetatable({
+    X = X,
+    Y = Y,
+    Width = Width,
+    Height = Height,
+  }, UDim2Meta)
+end
+
+function UDim2Meta.__add(A, B)
+  return UDim2.new(A.X + B.X, A.Y + B.Y, A.Width + B.Width, A.Height + B.Height)
+end
+
+function UDim2Meta.__sub(A, B)
+  return UDim2.new(A.X - B.X, A.Y - B.Y, A.Width - B.Width, A.Height - B.Height)
+end
+
+function UDim2Meta.__mul(A, B)
+  if type(B) == "number" then
+    return UDim2.new(A.X * B, A.Y * B, A.Width * B, A.Height * B)
+  end
+  return UDim2.new(A.X * B.X, A.Y * B.Y, A.Width * B.Width, A.Height * B.Height)
+end
+
+function UDim2Meta.__div(A, B)
+  if type(B) == "number" then
+    return UDim2.new(A.X / B, A.Y / B, A.Width / B, A.Height / B)
+  end
+  return UDim2.new(A.X / B.X, A.Y / B.Y, A.Width / B.Width, A.Height / B.Height)
+end
+
+function UDim2Meta.__unm(A)
+  return UDim2.new(-A.X, -A.Y, -A.Width, -A.Height)
+end
+
+function UDim2Meta.__eq(A, B)
+  return A.X == B.X and A.Y == B.Y and A.Width == B.Width and A.Height == B.Height
+end
+
+function UDim2Meta.__tostring(A)
+  return string.format("{%g, %g}, {%g, %g}", A.X.Scale, A.X.Offset, A.Y.Scale, A.Y.Offset)
+end
+
+function UDim2Meta:Lerp(Goal, Alpha)
+  return UDim2.new(self.X:Lerp(Goal.X, Alpha), self.Y:Lerp(Goal.Y, Alpha))
+end
+
+local Vector2 = {}
+local Vector2Meta = {}
+Vector2Meta.__index = Vector2Meta
+
+function Vector2.new(X, Y)
+  return setmetatable({
+    X = X or 0,
+    Y = Y or 0,
+  }, Vector2Meta)
+end
+
+function Vector2Meta.__index(self, Key)
+  if Key == "Magnitude" then
+    return math.sqrt(self.X ^ 2 + self.Y ^ 2)
+  elseif Key == "Unit" then
+    local Magnitude = self.Magnitude
+    return Magnitude == 0 and Vector2.new() or self / Magnitude
+  end
+
+  return Vector2Meta[Key]
+end
+
+function Vector2Meta.__add(A, B)
+  return Vector2.new(A.X + B.X, A.Y + B.Y)
+end
+
+function Vector2Meta.__sub(A, B)
+  return Vector2.new(A.X - B.X, A.Y - B.Y)
+end
+
+function Vector2Meta.__mul(A, B)
+  if type(B) == "number" then
+    return Vector2.new(A.X * B, A.Y * B)
+  end
+  return Vector2.new(A.X * B.X, A.Y * B.Y)
+end
+
+function Vector2Meta.__div(A, B)
+  if type(B) == "number" then
+    return Vector2.new(A.X / B, A.Y / B)
+  end
+  return Vector2.new(A.X / B.X, A.Y / B.Y)
+end
+
+function Vector2Meta.__unm(A)
+  return Vector2.new(-A.X, -A.Y)
+end
+
+function Vector2Meta.__eq(A, B)
+  return A.X == B.X and A.Y == B.Y
+end
+
+function Vector2Meta.__tostring(self)
+  return string.format("%g, %g", self.X, self.Y)
+end
+
+function Vector2Meta:FuzzyEq(Other, Epsilon)
+  Epsilon = Epsilon or 1e-5
+  return math.abs(self.X - Other.X) <= Epsilon and math.abs(self.Y - Other.Y) <= Epsilon
+end
+
+function Vector2Meta:Abs()
+  return Vector2.new(math.abs(self.X), math.abs(self.Y))
+end
+
+function Vector2Meta:Ceil()
+  return Vector2.new(math.ceil(self.X), math.ceil(self.Y))
+end
+
+function Vector2Meta:Floor()
+  return Vector2.new(math.floor(self.X), math.floor(self.Y))
+end
+
+function Vector2Meta:Sign()
+  return Vector2.new(Sign(self.X), Sign(self.Y))
+end
+
+function Vector2Meta:Min(Other)
+  return Vector2.new(math.min(self.X, Other.X), math.min(self.Y, Other.Y))
+end
+
+function Vector2Meta:Max(Other)
+  return Vector2.new(math.max(self.X, Other.X), math.max(self.Y, Other.Y))
+end
+
+function Vector2Meta:Dot(Other)
+  return self.X * Other.X + self.Y * Other.Y
+end
+
+function Vector2Meta:Angle(Other, IsSigned)
+  local Magnitude = self.Magnitude * Other.Magnitude
+  if Magnitude == 0 then
+    return 0
+  end
+
+  local Dot = self:Dot(Other)
+
+  if IsSigned then
+    return math.atan2(self.X * Other.Y - self.Y * Other.X, Dot)
+  end
+
+  return math.acos(math.max(-1, math.min(1, Dot / Magnitude)))
+end
+
+function Vector2Meta:Lerp(Goal, Alpha)
+  return self + (Goal - self) * Alpha
+end
+
+local Vector3 = {}
+local Vector3Meta = {}
+Vector3Meta.__index = Vector3Meta
+
+local function Sign(Number)
+  return Number > 0 and 1 or Number < 0 and -1 or 0
+end
+
+function Vector3.new(X, Y, Z)
+  return setmetatable({
+    X = X or 0,
+    Y = Y or 0,
+    Z = Z or 0,
+  }, Vector3Meta)
+end
+
+Vector3.one = Vector3.new(1, 1, 1)
+Vector3.zero = Vector3.new(0, 0, 0)
+Vector3.xAxis = Vector3.new(1, 0, 0)
+Vector3.yAxis = Vector3.new(0, 1, 0)
+Vector3.zAxis = Vector3.new(0, 0, 1)
+
+function Vector3Meta.__index(self, Key)
+  if Key == "Magnitude" then
+    return math.sqrt(self.X ^ 2 + self.Y ^ 2 + self.Z ^ 2)
+  elseif Key == "Unit" then
+    local Magnitude = self.Magnitude
+    return Magnitude == 0 and Vector3.zero or self / Magnitude
+  end
+
+  return Vector3Meta[Key]
+end
+
+function Vector3Meta.__newindex(self, Key, Value)
+  rawset(self, Key, Value)
+end
+
+function Vector3Meta.__add(A, B)
+  return Vector3.new(A.X + B.X, A.Y + B.Y, A.Z + B.Z)
+end
+
+function Vector3Meta.__sub(A, B)
+  return Vector3.new(A.X - B.X, A.Y - B.Y, A.Z - B.Z)
+end
+
+function Vector3Meta.__mul(A, B)
+  if type(B) == "number" then
+    return Vector3.new(A.X * B, A.Y * B, A.Z * B)
+  end
+  return Vector3.new(A.X * B.X, A.Y * B.Y, A.Z * B.Z)
+end
+
+function Vector3Meta.__div(A, B)
+  if type(B) == "number" then
+    return Vector3.new(A.X / B, A.Y / B, A.Z / B)
+  end
+  return Vector3.new(A.X / B.X, A.Y / B.Y, A.Z / B.Z)
+end
+
+function Vector3Meta.__unm(A)
+  return Vector3.new(-A.X, -A.Y, -A.Z)
+end
+
+function Vector3Meta.__eq(A, B)
+  return A.X == B.X and A.Y == B.Y and A.Z == B.Z
+end
+
+function Vector3Meta.__tostring(self)
+  return string.format("%g, %g, %g", self.X, self.Y, self.Z)
+end
+
+function Vector3Meta:FuzzyEq(Other, Epsilon)
+  Epsilon = Epsilon or 1e-5
+  return math.abs(self.X - Other.X) <= Epsilon
+    and math.abs(self.Y - Other.Y) <= Epsilon
+    and math.abs(self.Z - Other.Z) <= Epsilon
+end
+
+function Vector3Meta:Abs()
+  return Vector3.new(math.abs(self.X), math.abs(self.Y), math.abs(self.Z))
+end
+
+function Vector3Meta:Ceil()
+  return Vector3.new(math.ceil(self.X), math.ceil(self.Y), math.ceil(self.Z))
+end
+
+function Vector3Meta:Floor()
+  return Vector3.new(math.floor(self.X), math.floor(self.Y), math.floor(self.Z))
+end
+
+function Vector3Meta:Sign()
+  return Vector3.new(Sign(self.X), Sign(self.Y), Sign(self.Z))
+end
+
+function Vector3Meta:Min(Other)
+  return Vector3.new(math.min(self.X, Other.X), math.min(self.Y, Other.Y), math.min(self.Z, Other.Z))
+end
+
+function Vector3Meta:Max(Other)
+  return Vector3.new(math.max(self.X, Other.X), math.max(self.Y, Other.Y), math.max(self.Z, Other.Z))
+end
+
+function Vector3Meta:Dot(Other)
+  return self.X * Other.X + self.Y * Other.Y + self.Z * Other.Z
+end
+
+function Vector3Meta:Cross(Other)
+  return Vector3.new(
+    self.Y * Other.Z - self.Z * Other.Y,
+    self.Z * Other.X - self.X * Other.Z,
+    self.X * Other.Y - self.Y * Other.X
+  )
+end
+
+function Vector3Meta:Angle(Other, IsSigned)
+  local Magnitude = self.Magnitude * Other.Magnitude
+  if Magnitude == 0 then
+    return 0
+  end
+
+  local Dot = self:Dot(Other)
+
+  if IsSigned then
+    return math.atan2(self.X * Other.Y - self.Y * Other.X, Dot)
+  end
+
+  return math.acos(math.max(-1, math.min(1, Dot / Magnitude)))
+end
+
+function Vector3Meta:Lerp(Goal, Alpha)
+  return self + (Goal - self) * Alpha
+end
+
 Nya.Instance = Instance
 Nya.ServiceManager = ServiceManager
 Nya.Connection = Connection
 Nya.Signal = Signal
 Nya.Color3 = Color3
 Nya.Color4 = Color4
+Nya.UDim = UDim
+Nya.Vector2 = Vector2
+Nya.Vector3 = Vector3
 
 for Key, Value in pairs(ServiceManager) do
   Nya[Key] = Value
